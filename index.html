@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Memory Game</title>
+    <style>
+      body {
+        margin: 1rem;
+      }
+      #board {
+        display: grid;
+        grid-template-columns: repeat(var(--repeat), 1fr);
+        gap: 1rem;
+      }
+
+      #board > div {
+        margin: auto;
+        display: flex;
+        justify-content: center;
+      }
+
+      .card {
+        position: relative;
+        width: 7rem;
+        height: 7rem;
+      }
+
+      .content {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+        background: repeating-linear-gradient(
+          -45deg,
+          #228b22,
+          #228b22 10px,
+          #4cbb17 10px,
+          #4cbb17 20px
+        );
+
+        transition: transform 1s;
+        transform-style: preserve-3d;
+      }
+
+      .card.flipped .content {
+        transform: rotateY(180deg);
+        transition: transform 0.5s;
+      }
+
+      .card-back {
+        position: absolute;
+        height: 100%;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 4rem;
+        background: #525025;
+        color: white;
+        backface-visibility: hidden;
+        transform: rotateY(180deg);
+      }
+
+      .slider-container {
+        display: flex;
+        flex-direction: column;
+        padding: 0.5rem 1rem;
+      }
+
+      .slider-container label {
+        margin-bottom: 0.5rem;
+        font-size: 1.2rem;
+      }
+
+      #values {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        margin: 0 4px;
+      }
+
+      #start-button {
+        padding: 0.5rem;
+        background: none;
+        cursor: pointer;
+      }
+
+      #new-game {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        background: #0003;
+      }
+
+      .overlay-inner {
+        background-color: #eee;
+        margin: auto;
+        padding: 2rem;
+        box-shadow: 1px 1px 1px #6f6f6f;
+        width: 90%;
+        max-width: 20rem;
+      }
+
+      #result {
+        font-size: 1.25rem;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      <h1>Memory Game</h1>
+    </div>
+    <div id="board"></div>
+    <div id="overlay" class="overlay">
+      <div class="overlay-inner">
+        <div id="result"></div>
+        <div id="new-game">
+          <h2>Start new game!</h2>
+          <div class="slider-container">
+            <label for="table-size"
+              >Table size: <span id="size-value">4</span></label
+            >
+            <input
+              type="range"
+              name="table-size"
+              id="table-size"
+              step="1"
+              min="4"
+              max="6"
+              value="4"
+              list="values"
+            />
+            <datalist id="values">
+              <option value="4" label="4"></option>
+              <option value="5" label="5"></option>
+              <option value="6" label="6"></option>
+            </datalist>
+          </div>
+          <button id="start-button">Start!</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      const startButton = document.getElementById("start-button");
+      const board = document.getElementById("board");
+      const slider = document.getElementById("table-size");
+      const sizeValue = document.getElementById("size-value");
+      const overlay = document.getElementById("overlay");
+      const result = document.getElementById("result");
+      let startTime,
+        endTime,
+        flipped = null,
+        paired = 0,
+        availablePairs;
+
+      /**
+       * Generates possible values for board game
+       * @returns {Array} List of possible values [0...9,a...z]
+       */
+      function generatePossibleValues() {
+        const CHAR_A = 97;
+        const CHAR_Z = 122;
+        // Creates a...z array based on unicodes
+        const charArr = [...Array(CHAR_Z - CHAR_A + 1).keys()].map((unicode) =>
+          String.fromCharCode(unicode + 97)
+        );
+
+        // Creates 0...9 array
+        const numberArr = Array(10).keys();
+
+        // Merge the two arrays together
+        const possibleValues = [...numberArr, ...charArr];
+        return possibleValues;
+      }
+
+      /**
+       * Converts seconds to human readable minutes and seconds text
+       * @param {number} inputSeconds - The seconds to convert to string
+       * @returns {string} Human readable time
+       */
+      function getHumanReadableString(inputSeconds) {
+        let result = "";
+        var minutes = Math.floor(inputSeconds / 60);
+        var seconds = (inputSeconds % 60) % 60;
+        if (minutes) {
+          result += `${minutes} minutes`;
+        }
+        if (seconds) {
+          result += `${result.length ? " " : ""}${seconds} seconds.`;
+        }
+        return result;
+      }
+
+      /**
+       * Sort fucntion to randomize order
+       * @returns {number} Number between [-0.5,0.5]
+       */
+      function randomize() {
+        return 0.5 - Math.random();
+      }
+
+      /**
+       * Handle click events for card element
+       * @returns {Event} Click Event object
+       */
+      function handleClick({ currentTarget }) {
+        const value = currentTarget.textContent;
+
+        // Flip the card
+        currentTarget.classList.add("flipped");
+
+        // Check if there was a previously flipped element
+        // to see if we could compare
+        if (flipped != null) {
+          // If previously flipped element has the same value as the recently flipped one
+          // we "mark them as paired" by removing them from the board
+          if (flipped.textContent === value) {
+            document
+              .querySelectorAll(`[data-id="${value}"]`)
+              .forEach((elem) => {
+                elem.removeEventListener("click", handleClick);
+                elem.style.opacity = "0"
+              });
+            paired += 1;
+          } else {
+            // If the pairing was not successful we flip them back after a short timeout
+            (function (elem) {
+              setTimeout(() => {
+                elem.classList.remove("flipped");
+                currentTarget.classList.remove("flipped");
+              }, 750);
+            })(flipped);
+          }
+          // Reset the flipped element if comparison is done
+          flipped = null;
+        } else {
+          // Store the currently flipped element
+          flipped = currentTarget;
+        }
+
+        // If we reach the maximum pairs we end the game
+        if (paired === availablePairs) {
+          endGame();
+        }
+      }
+
+      /**
+       * Creates card elements in the DOM based on given size
+       * @param {number} size - n size means nxn table
+       */
+      function createCardElements(size) {
+        // Generate card values by
+        // - randomize the order of the available values (0...9, a...z)
+        // - get n elements from the previous array
+        // - spread it twice into a new array
+        // - randomize the order of the new array
+        // It will then contain all the chosen values twice so every value has a pair
+        const values = [...generatePossibleValues()]
+          .sort(randomize)
+          .slice(0, size / 2);
+        const cardValues = [...values, ...values].sort(randomize);
+
+        // Builds the board of DOM elements based on the previous array
+        cardValues.forEach((cardValue) => {
+          const card = document.createElement("div");
+          card.setAttribute("data-id", cardValue);
+          card.className = "card";
+          card.addEventListener("click", handleClick);
+
+          const cardContent = document.createElement("div");
+          cardContent.className = "content";
+          card.appendChild(cardContent);
+
+          const cardBack = document.createElement("div");
+          cardBack.className = "card-back";
+          cardBack.textContent = cardValue;
+          cardContent.appendChild(cardBack);
+
+          board.appendChild(card);
+        });
+      }
+
+      /**
+       * Ending game function
+       * Displays overlay over the board and calculate result
+       */
+      function endGame() {
+        overlay.style.display = "flex";
+        endTime = +new Date();
+
+        console.debug("The game has ended:", new Date());
+        result.textContent = `Congratulations! You finished in ${getHumanReadableString(
+          (endTime - startTime) / 1000
+        )}`;
+      }
+
+      /**
+       * Starting game function
+       * Resets values and prepares board
+       */
+      function startGame() {
+        const size = slider.value;
+        startTime = +new Date();
+        endTime = 0;
+        flipped = null;
+        paired = 0;
+        board.innerHTML = "";
+        result.innerHTML = "";
+        console.debug(
+          `The game has started with ${size}x${size} table:`,
+          new Date()
+        );
+
+        overlay.style.display = "none";
+        availablePairs = Math.floor(Math.pow(Number(size), 2) / 2);
+        board.style.setProperty("--repeat", size);
+        createCardElements(Math.pow(Number(size), 2));
+      }
+
+      startButton.addEventListener("click", startGame);
+
+      slider.addEventListener("change", ({ target: { value } }) => {
+        sizeValue.textContent = value;
+      });
+    </script>
+  </body>
+</html>
